@@ -19,10 +19,16 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Tabel Pengguna (Admin & Pelihat)
+    # Cek & migrasi tabel users jika sebelumnya menggunakan username
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'username' in columns:
+        cursor.execute("DROP TABLE users")
+    
+    # Tabel Pengguna (Menggunakan Email)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
+            email TEXT PRIMARY KEY,
             password TEXT NOT NULL,
             role TEXT CHECK(role IN ('admin', 'pelihat')) NOT NULL
         )
@@ -55,9 +61,9 @@ def init_db():
         )
     ''')
     
-    # Kredensial Default
-    cursor.execute("INSERT OR IGNORE INTO users VALUES ('admin', 'admin123', 'admin')")
-    cursor.execute("INSERT OR IGNORE INTO users VALUES ('pelihat', 'user123', 'pelihat')")
+    # Akun Default Utama (Admin Utama: fawwaz.i.azzaka)
+    cursor.execute("INSERT OR IGNORE INTO users VALUES ('fawwaz.i.azzaka', 'admin123', 'admin')")
+    cursor.execute("INSERT OR IGNORE INTO users VALUES ('pelihat@gmail.com', 'user123', 'pelihat')")
     conn.commit()
 
 init_db()
@@ -66,54 +72,78 @@ init_db()
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
-    st.session_state.username = None
+    st.session_state.email = None
 
-def login(username, password):
+def login(email_input, password_input):
+    email_clean = email_input.strip().lower()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+    
+    # Deteksi Otomatis: Jika email mengandung 'fawwaz.i.azzaka', daftarkan/pastikan sebagai Admin
+    if "fawwaz.i.azzaka" in email_clean:
+        cursor.execute("SELECT role FROM users WHERE LOWER(email)=?", (email_clean,))
+        exist = cursor.fetchone()
+        if not exist:
+            # Jika belum ada di database, buatkan otomatis sebagai admin dengan password yang dimasukkan
+            cursor.execute("INSERT INTO users VALUES (?, ?, 'admin')", (email_clean, password_input))
+            conn.commit()
+
+    # Verifikasi Login dari Database
+    cursor.execute("SELECT role, password FROM users WHERE LOWER(email)=?", (email_clean,))
     user = cursor.fetchone()
-    if user:
+    
+    if user and user[1] == password_input:
         st.session_state.logged_in = True
         st.session_state.role = user[0]
-        st.session_state.username = username
+        st.session_state.email = email_clean
         st.rerun()
     else:
-        st.error("❌ Username atau password salah!")
+        st.error("❌ Email atau password salah!")
 
 def logout():
     st.session_state.logged_in = False
     st.session_state.role = None
-    st.session_state.username = None
+    st.session_state.email = None
     st.rerun()
 
 # --- HALAMAN LOGIN ---
-# --- HALAMAN LOGIN ---
 if not st.session_state.logged_in:
     st.markdown("<h2 style='text-align: center;'>🔒 Login Sistem Informasi Nilai TO</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center;'>Masukkan akun Admin atau Pelihat</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Masukkan Email dan Password Anda</p>", unsafe_allow_html=True)
     
     col_c1, col_c2, col_c3 = st.columns([1, 2, 1])
     with col_c2:
         with st.form("login_form"):
-            user_input = st.text_input("Username")
+            email_input = st.text_input("Email / ID Akun", placeholder="contoh: fawwaz.i.azzaka")
             pass_input = st.text_input("Password", type="password")
             btn_login = st.form_submit_button("Masuk", use_container_width=True)
             if btn_login:
-                login(user_input, pass_input)
+                if not email_input or not pass_input:
+                    st.warning("Mohon isi Email dan Password.")
+                else:
+                    login(email_input, pass_input)
     st.stop()
 
 # --- DASHBOARD & SIDEBAR (AFTER LOGIN) ---
-st.sidebar.markdown(f"### 👤 Akun: **{st.session_state.username}**")
+st.sidebar.markdown(f"### 👤 Akun: **{st.session_state.email}**")
 st.sidebar.markdown(f"**Hak Akses:** `{st.session_state.role.upper()}`")
 if st.sidebar.button("Logout 🚪", use_container_width=True):
     logout()
 
 st.sidebar.divider()
-menu = st.sidebar.radio(
-    "Navigasi Utama",
-    ["📊 Dashboard & Grafik Nilai", "➕ Tambah Data (Admin)", "✏️ Edit / Hapus Data (Admin)"]
-)
+
+# Pilihan Menu berdasarkan Role
+if st.session_state.role == "admin":
+    menu_options = [
+        "📊 Dashboard & Grafik Nilai", 
+        "➕ Tambah Data TO (Admin)", 
+        "✏️ Edit / Hapus Data TO (Admin)",
+        "👥 Kelola Akun User (Admin)"
+    ]
+else:
+    menu_options = ["📊 Dashboard & Grafik Nilai"]
+
+menu = st.sidebar.radio("Navigasi Utama", menu_options)
 
 conn = get_connection()
 
@@ -123,7 +153,6 @@ conn = get_connection()
 if menu == "📊 Dashboard & Grafik Nilai":
     st.title("📈 Dashboard Rekap & Perkembangan Nilai TO")
     
-    # Fetch Data
     df = pd.read_sql_query("SELECT * FROM nilai_to ORDER BY tanggal ASC", conn)
     
     if df.empty:
@@ -141,7 +170,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
             nis_opt = ["Semua NIS"] + list(df['nis'].unique())
             sel_nis = st.selectbox("Filter NIS", nis_opt)
 
-        # Apply Filters
         filtered_df = df.copy()
         if sel_kategori != "Semua":
             filtered_df = filtered_df[filtered_df['kategori'] == sel_kategori]
@@ -152,7 +180,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
 
         st.divider()
 
-        # TAB VIEW
         tab_tka, tab_utbk, tab_data = st.tabs(["📉 Grafik Perkembangan TKA", "📊 Grafik Perkembangan UTBK", "📋 Tabel Data Lengkap"])
 
         # --- TAB 1: GRAFIK TKA ---
@@ -167,10 +194,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 'tka_b_inggris_lan': 'B. Inggris Lanjut'
             }
 
-            if sel_siswa == "Semua Siswa" and len(filtered_df['nama'].unique()) > 1:
-                st.info("💡 **Tips:** Pilih nama siswa spesifik di menu filter atas untuk melihat riwayat tren individual.")
-            
-            # Format Data for Line Chart
             df_tka_melted = filtered_df.melt(
                 id_vars=['tanggal', 'nama_to', 'nama', 'nis'],
                 value_vars=tka_cols,
@@ -206,7 +229,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 'total_utbk': 'TOTAL UTBK'
             }
 
-            # Chart 1: Total Score Progress
             fig_total = px.line(
                 filtered_df,
                 x='nama_to',
@@ -218,7 +240,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
             fig_total.update_layout(xaxis_title="Pelaksanaan TO", yaxis_title="Total Skor UTBK")
             st.plotly_chart(fig_total, use_container_width=True)
 
-            # Chart 2: Subtest Progress Breakdown
             st.markdown("##### Breakdown Per Sub-tes UTBK")
             df_utbk_melted = filtered_df.melt(
                 id_vars=['tanggal', 'nama_to', 'nama', 'nis'],
@@ -244,7 +265,6 @@ if menu == "📊 Dashboard & Grafik Nilai":
             st.subheader("Data Mentah Rekapitulasi TO")
             st.dataframe(filtered_df, use_container_width=True)
             
-            # Export CSV Button
             csv = filtered_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download Rekap Data (CSV)",
@@ -256,140 +276,178 @@ if menu == "📊 Dashboard & Grafik Nilai":
 # ==========================================
 # 2. TAMBAH DATA (CREATE - ADMIN ONLY)
 # ==========================================
-elif menu == "➕ Tambah Data (Admin)":
+elif menu == "➕ Tambah Data TO (Admin)":
     st.title("➕ Input Nilai Try Out Baru")
     
-    if st.session_state.role != "admin":
-        st.error("🔒 **Akses Ditolak:** Halaman ini hanya untuk pengguna dengan role Admin. Akun Pelihat hanya dapat membaca data.")
-    else:
-        with st.form("form_tambah_nilai"):
-            st.subheader("📌 Informasi Siswa & TO")
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                nis = st.text_input("NIS Siswa", placeholder="Contoh: 2024001")
-            with c2:
-                nama = st.text_input("Nama Siswa", placeholder="Contoh: Budi Santoso")
-            with c3:
-                kategori = st.selectbox("Kategori TO", ["Internal", "Eksternal"])
-            with c4:
-                nama_to = st.text_input("Nama/Seri TO", placeholder="Contoh: TO-1 Ganesha")
-            
-            tanggal = st.date_input("Tanggal Pelaksanaan", value=date.today())
+    with st.form("form_tambah_nilai"):
+        st.subheader("📌 Informasi Siswa & TO")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            nis = st.text_input("NIS Siswa", placeholder="Contoh: 2024001")
+        with c2:
+            nama = st.text_input("Nama Siswa", placeholder="Contoh: Budi Santoso")
+        with c3:
+            kategori = st.selectbox("Kategori TO", ["Internal", "Eksternal"])
+        with c4:
+            nama_to = st.text_input("Nama/Seri TO", placeholder="Contoh: TO-1 Ganesha")
+        
+        tanggal = st.date_input("Tanggal Pelaksanaan", value=date.today())
 
-            st.divider()
-            st.subheader("📚 Nilai TKA (Tes Kemampuan Akademik)")
-            tk1, tk2, tk3, tk4, tk5 = st.columns(5)
-            with tk1:
-                tka_b_indo = st.number_input("B. Indonesia", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with tk2:
-                tka_b_inggris = st.number_input("B. Inggris", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with tk3:
-                tka_math = st.number_input("Matematika", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with tk4:
-                tka_mathlan = st.number_input("Math Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with tk5:
-                tka_b_inggris_lan = st.number_input("B. Inggris Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        st.divider()
+        st.subheader("📚 Nilai TKA (Tes Kemampuan Akademik)")
+        tk1, tk2, tk3, tk4, tk5 = st.columns(5)
+        with tk1:
+            tka_b_indo = st.number_input("B. Indonesia", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with tk2:
+            tka_b_inggris = st.number_input("B. Inggris", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with tk3:
+            tka_math = st.number_input("Matematika", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with tk4:
+            tka_mathlan = st.number_input("Math Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with tk5:
+            tka_b_inggris_lan = st.number_input("B. Inggris Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
 
-            st.divider()
-            st.subheader("🎯 Nilai Sub-tes UTBK")
-            ut1, ut2, ut3, ut4 = st.columns(4)
-            with ut1:
-                utbk_pu = st.number_input("Penalaran Umum (PU)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-                utbk_lit_indo = st.number_input("Literasi B. Indonesia", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with ut2:
-                utbk_pk = st.number_input("Pengetahuan Kuantitatif (PK)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-                utbk_lit_ing = st.number_input("Literasi B. Inggris", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with ut3:
-                utbk_ppu = st.number_input("PPU", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-                utbk_pm = st.number_input("Penalaran Matematika (PM)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-            with ut4:
-                utbk_pbm = st.number_input("PBM", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-                # Auto Calculate Average UTBK
-                calc_total = (utbk_pu + utbk_pk + utbk_ppu + utbk_pbm + utbk_lit_indo + utbk_lit_ing + utbk_pm) / 7.0
-                st.markdown(f"**Auto Rata-Rata UTBK:** `{calc_total:.2f}`")
+        st.divider()
+        st.subheader("🎯 Nilai Sub-tes UTBK")
+        ut1, ut2, ut3, ut4 = st.columns(4)
+        with ut1:
+            utbk_pu = st.number_input("Penalaran Umum (PU)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+            utbk_lit_indo = st.number_input("Literasi B. Indonesia", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with ut2:
+            utbk_pk = st.number_input("Pengetahuan Kuantitatif (PK)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+            utbk_lit_ing = st.number_input("Literasi B. Inggris", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with ut3:
+            utbk_ppu = st.number_input("PPU", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+            utbk_pm = st.number_input("Penalaran Matematika (PM)", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with ut4:
+            utbk_pbm = st.number_input("PBM", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+            calc_total = (utbk_pu + utbk_pk + utbk_ppu + utbk_pbm + utbk_lit_indo + utbk_lit_ing + utbk_pm) / 7.0
+            st.markdown(f"**Auto Rata-Rata UTBK:** `{calc_total:.2f}`")
 
-            total_utbk = st.number_input("Total / Rata-rata Skor UTBK (Bisa Diubah Manual)", min_value=0.0, max_value=1000.0, value=round(calc_total, 2))
+        total_utbk = st.number_input("Total / Rata-rata Skor UTBK (Bisa Diubah Manual)", min_value=0.0, max_value=1000.0, value=round(calc_total, 2))
 
-            submitted = st.form_submit_button("Simpan Data Nilai", use_container_width=True)
-            if submitted:
-                if not nis or not nama or not nama_to:
-                    st.error("Mohon lengkapi NIS, Nama Siswa, dan Nama TO!")
-                else:
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT INTO nilai_to (
-                            nis, nama, kategori, nama_to, tanggal,
-                            tka_b_indo, tka_b_inggris, tka_math, tka_mathlan, tka_b_inggris_lan,
-                            utbk_pu, utbk_pk, utbk_ppu, utbk_pbm, utbk_lit_indo, utbk_lit_ing, utbk_pm, total_utbk
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        nis, nama, kategori, nama_to, str(tanggal),
+        submitted = st.form_submit_button("Simpan Data Nilai", use_container_width=True)
+        if submitted:
+            if not nis or not nama or not nama_to:
+                st.error("Mohon lengkapi NIS, Nama Siswa, dan Nama TO!")
+            else:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO nilai_to (
+                        nis, nama, kategori, nama_to, tanggal,
                         tka_b_indo, tka_b_inggris, tka_math, tka_mathlan, tka_b_inggris_lan,
                         utbk_pu, utbk_pk, utbk_ppu, utbk_pbm, utbk_lit_indo, utbk_lit_ing, utbk_pm, total_utbk
-                    ))
-                    conn.commit()
-                    st.success(f"✅ Data nilai TO '{nama_to}' untuk {nama} berhasil disimpan!")
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    nis, nama, kategori, nama_to, str(tanggal),
+                    tka_b_indo, tka_b_inggris, tka_math, tka_mathlan, tka_b_inggris_lan,
+                    utbk_pu, utbk_pk, utbk_ppu, utbk_pbm, utbk_lit_indo, utbk_lit_ing, utbk_pm, total_utbk
+                ))
+                conn.commit()
+                st.success(f"✅ Data nilai TO '{nama_to}' untuk {nama} berhasil disimpan!")
 
 # ==========================================
-# 3. EDIT & HAPUS DATA (UPDATE/DELETE - ADMIN ONLY)
+# 3. EDIT & HAPUS DATA TO (UPDATE/DELETE - ADMIN ONLY)
 # ==========================================
-elif menu == "✏️ Edit / Hapus Data (Admin)":
+elif menu == "✏️ Edit / Hapus Data TO (Admin)":
     st.title("✏️ Kelola & Hapus Record Data Nilai")
     
-    if st.session_state.role != "admin":
-        st.error("🔒 **Akses Ditolak:** Halaman ini hanya untuk pengguna dengan role Admin. Akun Pelihat hanya dapat membaca data.")
+    df_edit = pd.read_sql_query("SELECT * FROM nilai_to", conn)
+    
+    if df_edit.empty:
+        st.info("Belum ada data nilai untuk dikelola.")
     else:
-        df_edit = pd.read_sql_query("SELECT * FROM nilai_to", conn)
+        st.dataframe(df_edit, use_container_width=True)
+        st.divider()
         
-        if df_edit.empty:
-            st.info("Belum ada data untuk dikelola.")
-        else:
-            st.dataframe(df_edit, use_container_width=True)
-            
-            st.divider()
-            col_act1, col_act2 = st.columns(2)
-            
-            # --- HAPUS DATA ---
-            with col_act1:
-                st.subheader("🗑️ Hapus Data")
-                id_hapus = st.number_input("Masukkan ID Data yang akan dihapus", min_value=1, step=1)
-                if st.button("Hapus Record Data", type="primary"):
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM nilai_to WHERE id=?", (id_hapus,))
-                    if cursor.fetchone():
-                        cursor.execute("DELETE FROM nilai_to WHERE id=?", (id_hapus,))
-                        conn.commit()
-                        st.success(f"Data dengan ID {id_hapus} berhasil dihapus!")
-                        st.rerun()
-                    else:
-                        st.error(f"Data ID {id_hapus} tidak ditemukan.")
-
-            # --- EDIT DATA ---
-            with col_act2:
-                st.subheader("✏️ Edit Data")
-                id_edit = st.number_input("Masukkan ID Data yang akan diedit", min_value=1, step=1)
-                
+        col_act1, col_act2 = st.columns(2)
+        
+        with col_act1:
+            st.subheader("🗑️ Hapus Data TO")
+            id_hapus = st.number_input("Masukkan ID Data yang akan dihapus", min_value=1, step=1)
+            if st.button("Hapus Record Data", type="primary"):
                 cursor = conn.cursor()
-                cursor.execute("SELECT * FROM nilai_to WHERE id=?", (id_edit,))
-                row = cursor.fetchone()
-                
-                if row:
-                    st.success(f"Editing ID: {id_edit} - Nama: {row[2]}")
-                    with st.form("form_update"):
-                        u_nis = st.text_input("NIS", value=row[1])
-                        u_nama = st.text_input("Nama", value=row[2])
-                        u_kategori = st.selectbox("Kategori", ["Internal", "Eksternal"], index=0 if row[3] == "Internal" else 1)
-                        u_nama_to = st.text_input("Nama TO", value=row[4])
-                        u_tka_b_indo = st.number_input("TKA B. Indo", value=float(row[6]))
-                        u_tka_mathlan = st.number_input("TKA Mathlan", value=float(row[9]))
-                        u_total_utbk = st.number_input("Total UTBK", value=float(row[17]))
-                        
-                        btn_update = st.form_submit_button("Update Data")
-                        if btn_update:
-                            cursor.execute('''
-                                UPDATE nilai_to SET nis=?, nama=?, kategori=?, nama_to=?, tka_b_indo=?, tka_mathlan=?, total_utbk=?
-                                WHERE id=?
-                            ''', (u_nis, u_nama, u_kategori, u_nama_to, u_tka_b_indo, u_tka_mathlan, u_total_utbk, id_edit))
-                            conn.commit()
-                            st.success(f"Data ID {id_edit} berhasil di-update!")
-                            st.rerun()
+                cursor.execute("SELECT id FROM nilai_to WHERE id=?", (id_hapus,))
+                if cursor.fetchone():
+                    cursor.execute("DELETE FROM nilai_to WHERE id=?", (id_hapus,))
+                    conn.commit()
+                    st.success(f"Data dengan ID {id_hapus} berhasil dihapus!")
+                    st.rerun()
+                else:
+                    st.error(f"Data ID {id_hapus} tidak ditemukan.")
+
+        with col_act2:
+            st.subheader("✏️ Edit Data TO")
+            id_edit = st.number_input("Masukkan ID Data yang akan diedit", min_value=1, step=1)
+            
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM nilai_to WHERE id=?", (id_edit,))
+            row = cursor.fetchone()
+            
+            if row:
+                st.success(f"Editing ID: {id_edit} - Nama: {row[2]}")
+                with st.form("form_update"):
+                    u_nis = st.text_input("NIS", value=row[1])
+                    u_nama = st.text_input("Nama", value=row[2])
+                    u_kategori = st.selectbox("Kategori", ["Internal", "Eksternal"], index=0 if row[3] == "Internal" else 1)
+                    u_nama_to = st.text_input("Nama TO", value=row[4])
+                    u_tka_b_indo = st.number_input("TKA B. Indo", value=float(row[6]))
+                    u_tka_mathlan = st.number_input("TKA Mathlan", value=float(row[9]))
+                    u_total_utbk = st.number_input("Total UTBK", value=float(row[17]))
+                    
+                    btn_update = st.form_submit_button("Update Data")
+                    if btn_update:
+                        cursor.execute('''
+                            UPDATE nilai_to SET nis=?, nama=?, kategori=?, nama_to=?, tka_b_indo=?, tka_mathlan=?, total_utbk=?
+                            WHERE id=?
+                        ''', (u_nis, u_nama, u_kategori, u_nama_to, u_tka_b_indo, u_tka_mathlan, u_total_utbk, id_edit))
+                        conn.commit()
+                        st.success(f"Data ID {id_edit} berhasil di-update!")
+                        st.rerun()
+
+# ==========================================
+# 4. KELOLA AKUN USER (ADMIN ONLY)
+# ==========================================
+elif menu == "👥 Kelola Akun User (Admin)":
+    st.title("👥 Kelola Akun Pengguna Sistem")
+    
+    col_u1, col_u2 = st.columns([3, 2])
+    
+    cursor = conn.cursor()
+    
+    with col_u1:
+        st.subheader("📋 Daftar Akun Terdaftar")
+        df_users = pd.read_sql_query("SELECT email AS 'Email / ID User', role AS 'Role / Hak Akses' FROM users", conn)
+        st.dataframe(df_users, use_container_width=True)
+        
+        st.divider()
+        st.subheader("🗑️ Hapus Akun User")
+        user_to_delete = st.selectbox("Pilih Email Akun yang Akan Dihapus", df_users['Email / ID User'].tolist())
+        if st.button("Hapus Akun Ini", type="primary"):
+            if user_to_delete == st.session_state.email:
+                st.error("Anda tidak bisa menghapus akun Anda sendiri yang sedang digunakan!")
+            else:
+                cursor.execute("DELETE FROM users WHERE email=?", (user_to_delete,))
+                conn.commit()
+                st.success(f"Akun `{user_to_delete}` berhasil dihapus!")
+                st.rerun()
+
+    with col_u2:
+        st.subheader("➕ Tambah Akun Baru")
+        with st.form("form_tambah_user"):
+            new_email = st.text_input("Email / ID Akun Baru", placeholder="contoh: siswa1@gmail.com")
+            new_pass = st.text_input("Password Baru", type="password")
+            new_role = st.selectbox("Role / Hak Akses", ["pelihat", "admin"])
+            
+            submit_user = st.form_submit_button("Tambah Akun", use_container_width=True)
+            if submit_user:
+                if not new_email or not new_pass:
+                    st.error("Mohon isi Email dan Password akun baru!")
+                else:
+                    try:
+                        cursor.execute("INSERT INTO users VALUES (?, ?, ?)", (new_email.strip().lower(), new_pass, new_role))
+                        conn.commit()
+                        st.success(f"✅ Akun `{new_email}` dengan role `{new_role.upper()}` berhasil dibuat!")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Email tersebut sudah terdaftar!")
