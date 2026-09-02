@@ -88,6 +88,7 @@ def logout():
     st.rerun()
 
 # --- HALAMAN LOGIN ---
+# --- HALAMAN LOGIN ---
 if not st.session_state.logged_in:
     st.markdown("<h2 style='text-align: center;'>🔒 Login Sistem Informasi Nilai TO</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Masukkan akun Admin atau Pelihat</p>", unsafe_allow_html=True)
@@ -100,7 +101,6 @@ if not st.session_state.logged_in:
             btn_login = st.form_submit_button("Masuk", use_container_width=True)
             if btn_login:
                 login(user_input, pass_input)
-        st.info("💡 **Akun Default:**\n- **Admin**: `admin` / `admin123` (Akses Penuh CRUD)\n- **Pelihat**: `pelihat` / `user123` (Read-Only / Terkunci)")
     st.stop()
 
 # --- DASHBOARD & SIDEBAR (AFTER LOGIN) ---
