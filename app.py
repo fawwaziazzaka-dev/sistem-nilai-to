@@ -247,10 +247,13 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 x='nama_to',
                 y='Nilai',
                 color='Mata Pelajaran',
+                line_group='nama',
+                text='nama',  # Menampilkan Nama Peserta pada Garis
                 markers=True,
                 hover_data=['tanggal', 'nama'],
                 title=f"Tren Nilai TKA - {sel_siswa if sel_siswa != 'Semua Siswa' else 'Seluruh Siswa'}"
             )
+            fig_tka.update_traces(textposition="top center")
             fig_tka.update_layout(xaxis_title="Pelaksanaan TO", yaxis_title="Skor TKA", hovermode="x unified")
             st.plotly_chart(fig_tka, use_container_width=True)
 
@@ -273,9 +276,11 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 x='nama_to',
                 y='total_utbk',
                 color='nama' if sel_siswa == "Semua Siswa" else None,
+                text='nama',  # Menampilkan Nama Peserta pada Garis
                 markers=True,
                 title="📈 Tren Rata-Rata / Total Skor UTBK"
             )
+            fig_total.update_traces(textposition="top center")
             fig_total.update_layout(xaxis_title="Pelaksanaan TO", yaxis_title="Total Skor UTBK")
             st.plotly_chart(fig_total, use_container_width=True)
 
@@ -293,9 +298,12 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 x='nama_to',
                 y='Skor',
                 color='Subtest UTBK',
+                line_group='nama',
+                text='nama',  # Menampilkan Nama Peserta pada Garis
                 markers=True,
                 title="Rincian Sub-tes UTBK"
             )
+            fig_utbk_sub.update_traces(textposition="top center")
             fig_utbk_sub.update_layout(xaxis_title="Pelaksanaan TO", yaxis_title="Skor Sub-tes", hovermode="x unified")
             st.plotly_chart(fig_utbk_sub, use_container_width=True)
 
