@@ -44,7 +44,7 @@ def init_db():
     if 'username' in user_cols:
         cursor.execute("DROP TABLE users")
     
-    # Migrasi otomatis tabel nilai_to jika masih menggunakan kolom lama (tka_mathlan)
+    # Migrasi otomatis tabel nilai_to jika masih menggunakan kolom lama
     cursor.execute("PRAGMA table_info(nilai_to)")
     to_cols = [col[1] for col in cursor.fetchall()]
     if 'tka_mathlan' in to_cols:
@@ -96,11 +96,24 @@ def init_db():
 
 init_db()
 
-# --- MANAJEMEN SESI AUTHENTICATION ---
+# --- MANAJEMEN SESI AUTHENTICATION & PERSISTENSI LOGIN ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
     st.session_state.email = None
+
+# KEBAL REFRESH: Cek URL Query Parameter saat halaman dimuat/di-refresh
+if not st.session_state.logged_in:
+    if "user" in st.query_params:
+        saved_email = st.query_params["user"].strip().lower()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT role FROM users WHERE LOWER(email)=?", (saved_email,))
+        user_row = cursor.fetchone()
+        if user_row:
+            st.session_state.logged_in = True
+            st.session_state.role = user_row[0]
+            st.session_state.email = saved_email
 
 def login(email_input, password_input):
     email_clean = email_input.strip().lower()
@@ -122,6 +135,8 @@ def login(email_input, password_input):
         st.session_state.logged_in = True
         st.session_state.role = user[0]
         st.session_state.email = email_clean
+        # Simpan sesi login ke URL query parameter agar kebal refresh
+        st.query_params["user"] = email_clean
         st.rerun()
     else:
         st.error("❌ Email atau password salah!")
@@ -130,6 +145,8 @@ def logout():
     st.session_state.logged_in = False
     st.session_state.role = None
     st.session_state.email = None
+    # Hapus parameter URL saat logout resmi
+    st.query_params.clear()
     st.rerun()
 
 # --- HALAMAN LOGIN ---
@@ -211,17 +228,15 @@ if menu == "📊 Dashboard & Grafik Nilai":
         with tab_tka:
             st.subheader("Grafik Garis Perkembangan Nilai TKA")
             
-            # Format Data Dinamis untuk Grafik Garis TKA (Wajib & Mapel Pilihan 1 & 2)
             tka_records = []
             for _, row in filtered_df.iterrows():
-                # Mapel Wajib
                 tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'B. Indonesia', 'Nilai': row['tka_b_indo']})
                 tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'B. Inggris', 'Nilai': row['tka_b_inggris']})
                 tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'Matematika', 'Nilai': row['tka_math']})
-                # Mapel Pilihan 1
+                
                 m1_label = f"Pilihan 1 ({row['tka_mapel1_nama']})" if row['tka_mapel1_nama'] else "Mapel Pilihan 1"
                 tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': m1_label, 'Nilai': row['tka_mapel1_nilai']})
-                # Mapel Pilihan 2
+                
                 m2_label = f"Pilihan 2 ({row['tka_mapel2_nama']})" if row['tka_mapel2_nama'] else "Mapel Pilihan 2"
                 tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': m2_label, 'Nilai': row['tka_mapel2_nilai']})
 
@@ -425,7 +440,6 @@ elif menu == "✏️ Edit / Hapus Data TO (Admin)":
                     u_kategori = st.selectbox("Kategori", ["Internal", "Eksternal"], index=0 if row[3] == "Internal" else 1)
                     u_nama_to = st.text_input("Nama TO", value=row[4])
                     
-                    # Mapel Wajib & Pilihan Index Check
                     m1_idx = DAFTAR_MAPEL_PILIHAN.index(row[9]) if row[9] in DAFTAR_MAPEL_PILIHAN else 0
                     m2_idx = DAFTAR_MAPEL_PILIHAN.index(row[11]) if row[11] in DAFTAR_MAPEL_PILIHAN else 1
                     
