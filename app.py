@@ -11,6 +11,25 @@ st.set_page_config(
     layout="wide"
 )
 
+# LIST MATA PELAJARAN PILIHAN TKA SMA
+DAFTAR_MAPEL_PILIHAN = [
+    "Matematika Lanjut",
+    "Bahasa Inggris Lanjut",
+    "Fisika",
+    "Kimia",
+    "Biologi",
+    "Ekonomi",
+    "Sosiologi",
+    "Geografi",
+    "Sejarah",
+    "Bahasa Jepang",
+    "Bahasa Mandarin",
+    "Bahasa Jerman",
+    "Bahasa Prancis",
+    "Bahasa Arab",
+    "Bahasa Korea"
+]
+
 # --- INISIALISASI & KONEKSI DATABASE SQLITE ---
 def get_connection():
     return sqlite3.connect("database_to.db", check_same_thread=False)
@@ -19,11 +38,17 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Cek & migrasi tabel users jika sebelumnya menggunakan username
+    # Migrasi otomatis tabel users jika masih versi lama
     cursor.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'username' in columns:
+    user_cols = [col[1] for col in cursor.fetchall()]
+    if 'username' in user_cols:
         cursor.execute("DROP TABLE users")
+    
+    # Migrasi otomatis tabel nilai_to jika masih menggunakan kolom lama (tka_mathlan)
+    cursor.execute("PRAGMA table_info(nilai_to)")
+    to_cols = [col[1] for col in cursor.fetchall()]
+    if 'tka_mathlan' in to_cols:
+        cursor.execute("DROP TABLE nilai_to")
     
     # Tabel Pengguna (Menggunakan Email)
     cursor.execute('''
@@ -43,12 +68,15 @@ def init_db():
             kategori TEXT CHECK(kategori IN ('Internal', 'Eksternal')) NOT NULL,
             nama_to TEXT NOT NULL,
             tanggal DATE NOT NULL,
-            -- TKA Subjects
+            -- TKA Wajib
             tka_b_indo REAL DEFAULT 0,
             tka_b_inggris REAL DEFAULT 0,
             tka_math REAL DEFAULT 0,
-            tka_mathlan REAL DEFAULT 0,
-            tka_b_inggris_lan REAL DEFAULT 0,
+            -- TKA Pilihan (Mapel 1 & Mapel 2)
+            tka_mapel1_nama TEXT DEFAULT 'Mapel Pilihan 1',
+            tka_mapel1_nilai REAL DEFAULT 0,
+            tka_mapel2_nama TEXT DEFAULT 'Mapel Pilihan 2',
+            tka_mapel2_nilai REAL DEFAULT 0,
             -- UTBK Subtests
             utbk_pu REAL DEFAULT 0,
             utbk_pk REAL DEFAULT 0,
@@ -61,7 +89,7 @@ def init_db():
         )
     ''')
     
-    # Akun Default Utama (Admin Utama: fawwaz.i.azzaka)
+    # Akun Default Utama
     cursor.execute("INSERT OR IGNORE INTO users VALUES ('fawwaz.i.azzaka', 'admin123', 'admin')")
     cursor.execute("INSERT OR IGNORE INTO users VALUES ('pelihat@gmail.com', 'user123', 'pelihat')")
     conn.commit()
@@ -84,11 +112,9 @@ def login(email_input, password_input):
         cursor.execute("SELECT role FROM users WHERE LOWER(email)=?", (email_clean,))
         exist = cursor.fetchone()
         if not exist:
-            # Jika belum ada di database, buatkan otomatis sebagai admin dengan password yang dimasukkan
             cursor.execute("INSERT INTO users VALUES (?, ?, 'admin')", (email_clean, password_input))
             conn.commit()
 
-    # Verifikasi Login dari Database
     cursor.execute("SELECT role, password FROM users WHERE LOWER(email)=?", (email_clean,))
     user = cursor.fetchone()
     
@@ -132,7 +158,6 @@ if st.sidebar.button("Logout 🚪", use_container_width=True):
 
 st.sidebar.divider()
 
-# Pilihan Menu berdasarkan Role
 if st.session_state.role == "admin":
     menu_options = [
         "📊 Dashboard & Grafik Nilai", 
@@ -185,22 +210,22 @@ if menu == "📊 Dashboard & Grafik Nilai":
         # --- TAB 1: GRAFIK TKA ---
         with tab_tka:
             st.subheader("Grafik Garis Perkembangan Nilai TKA")
-            tka_cols = ['tka_b_indo', 'tka_b_inggris', 'tka_math', 'tka_mathlan', 'tka_b_inggris_lan']
-            tka_labels = {
-                'tka_b_indo': 'B. Indonesia',
-                'tka_b_inggris': 'B. Inggris',
-                'tka_math': 'Matematika',
-                'tka_mathlan': 'Math Lanjut',
-                'tka_b_inggris_lan': 'B. Inggris Lanjut'
-            }
+            
+            # Format Data Dinamis untuk Grafik Garis TKA (Wajib & Mapel Pilihan 1 & 2)
+            tka_records = []
+            for _, row in filtered_df.iterrows():
+                # Mapel Wajib
+                tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'B. Indonesia', 'Nilai': row['tka_b_indo']})
+                tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'B. Inggris', 'Nilai': row['tka_b_inggris']})
+                tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': 'Matematika', 'Nilai': row['tka_math']})
+                # Mapel Pilihan 1
+                m1_label = f"Pilihan 1 ({row['tka_mapel1_nama']})" if row['tka_mapel1_nama'] else "Mapel Pilihan 1"
+                tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': m1_label, 'Nilai': row['tka_mapel1_nilai']})
+                # Mapel Pilihan 2
+                m2_label = f"Pilihan 2 ({row['tka_mapel2_nama']})" if row['tka_mapel2_nama'] else "Mapel Pilihan 2"
+                tka_records.append({'nama_to': row['nama_to'], 'nama': row['nama'], 'tanggal': row['tanggal'], 'Mata Pelajaran': m2_label, 'Nilai': row['tka_mapel2_nilai']})
 
-            df_tka_melted = filtered_df.melt(
-                id_vars=['tanggal', 'nama_to', 'nama', 'nis'],
-                value_vars=tka_cols,
-                var_name='Mata Pelajaran',
-                value_name='Nilai'
-            )
-            df_tka_melted['Mata Pelajaran'] = df_tka_melted['Mata Pelajaran'].map(tka_labels)
+            df_tka_melted = pd.DataFrame(tka_records)
             
             fig_tka = px.line(
                 df_tka_melted,
@@ -225,8 +250,7 @@ if menu == "📊 Dashboard & Grafik Nilai":
                 'utbk_pbm': 'PBM',
                 'utbk_lit_indo': 'Literasi B. Indo',
                 'utbk_lit_ing': 'Literasi B. Ing',
-                'utbk_pm': 'Penalaran Math (PM)',
-                'total_utbk': 'TOTAL UTBK'
+                'utbk_pm': 'Penalaran Math (PM)'
             }
 
             fig_total = px.line(
@@ -295,17 +319,24 @@ elif menu == "➕ Tambah Data TO (Admin)":
 
         st.divider()
         st.subheader("📚 Nilai TKA (Tes Kemampuan Akademik)")
-        tk1, tk2, tk3, tk4, tk5 = st.columns(5)
-        with tk1:
+        
+        st.markdown("##### 1. Mata Pelajaran Wajib TKA")
+        tw1, tw2, tw3 = st.columns(3)
+        with tw1:
             tka_b_indo = st.number_input("B. Indonesia", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-        with tk2:
+        with tw2:
             tka_b_inggris = st.number_input("B. Inggris", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-        with tk3:
+        with tw3:
             tka_math = st.number_input("Matematika", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-        with tk4:
-            tka_mathlan = st.number_input("Math Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
-        with tk5:
-            tka_b_inggris_lan = st.number_input("B. Inggris Lanjut", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+
+        st.markdown("##### 2. Mata Pelajaran Pilihan TKA SMA")
+        tp1, tp2 = st.columns(2)
+        with tp1:
+            mapel1_nama = st.selectbox("Mapel Pilihan 1", DAFTAR_MAPEL_PILIHAN, index=0)
+            mapel1_nilai = st.number_input("Nilai Mapel Pilihan 1", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
+        with tp2:
+            mapel2_nama = st.selectbox("Mapel Pilihan 2", DAFTAR_MAPEL_PILIHAN, index=1)
+            mapel2_nilai = st.number_input("Nilai Mapel Pilihan 2", min_value=0.0, max_value=1000.0, value=0.0, step=5.0)
 
         st.divider()
         st.subheader("🎯 Nilai Sub-tes UTBK")
@@ -335,12 +366,14 @@ elif menu == "➕ Tambah Data TO (Admin)":
                 cursor.execute('''
                     INSERT INTO nilai_to (
                         nis, nama, kategori, nama_to, tanggal,
-                        tka_b_indo, tka_b_inggris, tka_math, tka_mathlan, tka_b_inggris_lan,
+                        tka_b_indo, tka_b_inggris, tka_math,
+                        tka_mapel1_nama, tka_mapel1_nilai, tka_mapel2_nama, tka_mapel2_nilai,
                         utbk_pu, utbk_pk, utbk_ppu, utbk_pbm, utbk_lit_indo, utbk_lit_ing, utbk_pm, total_utbk
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     nis, nama, kategori, nama_to, str(tanggal),
-                    tka_b_indo, tka_b_inggris, tka_math, tka_mathlan, tka_b_inggris_lan,
+                    tka_b_indo, tka_b_inggris, tka_math,
+                    mapel1_nama, mapel1_nilai, mapel2_nama, mapel2_nilai,
                     utbk_pu, utbk_pk, utbk_ppu, utbk_pbm, utbk_lit_indo, utbk_lit_ing, utbk_pm, total_utbk
                 ))
                 conn.commit()
@@ -391,16 +424,26 @@ elif menu == "✏️ Edit / Hapus Data TO (Admin)":
                     u_nama = st.text_input("Nama", value=row[2])
                     u_kategori = st.selectbox("Kategori", ["Internal", "Eksternal"], index=0 if row[3] == "Internal" else 1)
                     u_nama_to = st.text_input("Nama TO", value=row[4])
-                    u_tka_b_indo = st.number_input("TKA B. Indo", value=float(row[6]))
-                    u_tka_mathlan = st.number_input("TKA Mathlan", value=float(row[9]))
-                    u_total_utbk = st.number_input("Total UTBK", value=float(row[17]))
+                    
+                    # Mapel Wajib & Pilihan Index Check
+                    m1_idx = DAFTAR_MAPEL_PILIHAN.index(row[9]) if row[9] in DAFTAR_MAPEL_PILIHAN else 0
+                    m2_idx = DAFTAR_MAPEL_PILIHAN.index(row[11]) if row[11] in DAFTAR_MAPEL_PILIHAN else 1
+                    
+                    u_mapel1_nama = st.selectbox("Edit Mapel Pilihan 1", DAFTAR_MAPEL_PILIHAN, index=m1_idx)
+                    u_mapel1_nilai = st.number_input("Nilai Mapel Pilihan 1", value=float(row[10]))
+                    
+                    u_mapel2_nama = st.selectbox("Edit Mapel Pilihan 2", DAFTAR_MAPEL_PILIHAN, index=m2_idx)
+                    u_mapel2_nilai = st.number_input("Nilai Mapel Pilihan 2", value=float(row[12]))
+                    
+                    u_total_utbk = st.number_input("Total UTBK", value=float(row[19]))
                     
                     btn_update = st.form_submit_button("Update Data")
                     if btn_update:
                         cursor.execute('''
-                            UPDATE nilai_to SET nis=?, nama=?, kategori=?, nama_to=?, tka_b_indo=?, tka_mathlan=?, total_utbk=?
+                            UPDATE nilai_to SET nis=?, nama=?, kategori=?, nama_to=?, 
+                            tka_mapel1_nama=?, tka_mapel1_nilai=?, tka_mapel2_nama=?, tka_mapel2_nilai=?, total_utbk=?
                             WHERE id=?
-                        ''', (u_nis, u_nama, u_kategori, u_nama_to, u_tka_b_indo, u_tka_mathlan, u_total_utbk, id_edit))
+                        ''', (u_nis, u_nama, u_kategori, u_nama_to, u_mapel1_nama, u_mapel1_nilai, u_mapel2_nama, u_mapel2_nilai, u_total_utbk, id_edit))
                         conn.commit()
                         st.success(f"Data ID {id_edit} berhasil di-update!")
                         st.rerun()
@@ -412,7 +455,6 @@ elif menu == "👥 Kelola Akun User (Admin)":
     st.title("👥 Kelola Akun Pengguna Sistem")
     
     col_u1, col_u2 = st.columns([3, 2])
-    
     cursor = conn.cursor()
     
     with col_u1:
